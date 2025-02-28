@@ -1,23 +1,9 @@
-import { useState, useEffect } from "react";
+import { useEffect, useState } from "react";
 import { Button, message, Card, Tag, Modal, Form, Input, Select } from "antd";
-import api from "../api/axios";
+import { fetchTasks, createTask, updateTask, deleteTask } from "../services/taskService";
+import { addComment } from "../services/commentService";
 import { useNavigate } from "react-router-dom";
-
-interface Comment {
-    id: string;
-    text: string;
-    createdAt: string;
-}
-
-interface Task {
-    id: string;
-    title: string;
-    description?: string;
-    status: "pending" | "in_progress" | "done";
-    priority: "High" | "Medium" | "Low";
-    comments: Comment[];
-}
-
+import { Task } from "../types/task";
 
 const priorityColors: any = {
     High: "red",
@@ -27,52 +13,30 @@ const priorityColors: any = {
 
 const Tasks = () => {
     const [tasks, setTasks] = useState<Task[]>([]);
-
-
-    // Modal do dodawania / edycji
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [modalMode, setModalMode] = useState<"add" | "edit">("add");
     const [modalData, setModalData] = useState<any>(null);
     const [form] = Form.useForm();
-
+    const navigate = useNavigate();
+    
     // Modal do komentarzy
     const [isCommentModalOpen, setIsCommentModalOpen] = useState(false);
     const [commentTaskId, setCommentTaskId] = useState<string | null>(null);
     const [commentText, setCommentText] = useState("");
 
-    const navigate = useNavigate();
-
+    // 🔹 Pobieranie zadań na start i po każdej zmianie
     useEffect(() => {
-        const token = localStorage.getItem("token");
-        if (!token) {
-            message.error("Musisz się zalogować!");
-            navigate("/");
-        }
-        fetchTasks();
+        loadTasks();
     }, []);
 
-    const fetchTasks = async () => {
+    const loadTasks = async () => {
         try {
-            const res = await api.get("/tasks", {
-                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-            });
-
-            // Pobranie komentarzy dla każdego zadania
-            const tasksWithComments: Task[] = await Promise.all(
-                res.data.map(async (task: Task) => {
-                    const commentsRes = await api.get(`/comments/${task.id}`, {
-                        headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-                    });
-                    return { ...task, comments: commentsRes.data };
-                })
-            );
-
-            setTasks(tasksWithComments);
+            const data = await fetchTasks();
+            setTasks(data);
         } catch (err) {
             message.error("Nie udało się pobrać zadań");
         }
     };
-
 
     const handleModalOpen = (mode: "add" | "edit", task?: any) => {
         setModalMode(mode);
@@ -85,31 +49,25 @@ const Tasks = () => {
         try {
             const values = await form.validateFields();
             if (modalMode === "add") {
-                await api.post("/tasks", values, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-                });
+                await createTask(values);
                 message.success("Dodano zadanie!");
             } else {
-                await api.put(`/tasks/${modalData.id}`, values, {
-                    headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-                });
+                await updateTask(modalData.id, values);
                 message.success("Zaktualizowano zadanie!");
             }
             setIsModalOpen(false);
             form.resetFields();
-            fetchTasks();
+            loadTasks(); // 🔹 Odświeżamy listę
         } catch (err) {
-            message.error(`Nie udało się ${modalMode === "add" ? "dodać" : "edytować"} zadania`);
+            message.error("Nie udało się dodać/edytować zadania");
         }
     };
 
     const handleDeleteTask = async (id: string) => {
         try {
-            await api.delete(`/tasks/${id}`, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-            });
+            await deleteTask(id);
             message.success("Usunięto zadanie!");
-            fetchTasks();
+            loadTasks(); // 🔹 Odświeżamy listę po usunięciu
         } catch (err) {
             message.error("Nie udało się usunąć zadania");
         }
@@ -123,51 +81,27 @@ const Tasks = () => {
     const handleAddComment = async () => {
         if (!commentTaskId) return;
         try {
-            await api.post(`/comments/${commentTaskId}`, { text: commentText }, {
-                headers: { Authorization: `Bearer ${localStorage.getItem("token")}` },
-            });
+            await addComment(commentTaskId, commentText);
             message.success("Dodano komentarz!");
             setCommentText("");
             setIsCommentModalOpen(false);
-            fetchTasks();
+            loadTasks(); // 🔹 Odświeżamy listę po dodaniu komentarza
         } catch (err) {
             message.error("Nie udało się dodać komentarza");
         }
     };
 
-    const handleLogout = () => {
-        localStorage.removeItem("token");
-        message.success("Wylogowano!");
-        navigate("/");
-    };
-
     return (
         <div>
             <h1>Lista Zadań</h1>
-            <Button type="primary" danger onClick={handleLogout} style={{ marginBottom: 20 }}>
+            <Button type="primary" danger onClick={() => { localStorage.removeItem("token"); navigate("/"); }}>
                 Wyloguj
             </Button>
 
-            {/* 🔴 LISTA ZADAŃ */}
             <div style={{ display: "grid", gap: "20px", gridTemplateColumns: "repeat(auto-fill, minmax(300px, 1fr))" }}>
-                {tasks.map((task: any) => (
+                {tasks.map((task) => (
                     <Card key={task.id} title={task.title} extra={<Tag color={priorityColors[task.priority]}>{task.priority}</Tag>}>
                         <p>{task.description}</p>
-
-                        {/* 🔹 KOMENTARZE */}
-                        {task.comments.length > 0 ? (
-                            <div style={{ marginTop: 10 }}>
-                                <strong>Komentarze:</strong>
-                                {task.comments.map((comment: any) => (
-                                    <p key={comment.id} style={{ fontSize: "14px", margin: "5px 0", borderBottom: "1px solid #eee", paddingBottom: 5 }}>
-                                        {comment.text}
-                                    </p>
-                                ))}
-                            </div>
-                        ) : (
-                            <p style={{ fontSize: "14px", fontStyle: "italic", color: "#aaa" }}>Brak komentarzy</p>
-                        )}
-
                         <Button onClick={() => handleModalOpen("edit", task)}>Edytuj</Button>
                         <Button danger onClick={() => handleDeleteTask(task.id)}>Usuń</Button>
                         <Button onClick={() => handleCommentModalOpen(task.id)}>Dodaj komentarz</Button>
@@ -175,9 +109,7 @@ const Tasks = () => {
                 ))}
             </div>
 
-            <Button type="primary" onClick={() => handleModalOpen("add")} style={{ marginTop: 20 }}>
-                Dodaj zadanie
-            </Button>
+            <Button type="primary" onClick={() => handleModalOpen("add")}>Dodaj zadanie</Button>
 
             {/* 🔴 MODAL: DODAWANIE / EDYCJA ZADANIA */}
             <Modal
@@ -211,17 +143,8 @@ const Tasks = () => {
             </Modal>
 
             {/* 🔴 MODAL: DODAWANIE KOMENTARZA */}
-            <Modal
-                title="Dodaj komentarz"
-                open={isCommentModalOpen}
-                onCancel={() => setIsCommentModalOpen(false)}
-                onOk={handleAddComment}
-            >
-                <Input.TextArea
-                    value={commentText}
-                    onChange={(e) => setCommentText(e.target.value)}
-                    placeholder="Wpisz komentarz..."
-                />
+            <Modal title="Dodaj komentarz" open={isCommentModalOpen} onCancel={() => setIsCommentModalOpen(false)} onOk={handleAddComment}>
+                <Input.TextArea value={commentText} onChange={(e) => setCommentText(e.target.value)} />
             </Modal>
         </div>
     );
